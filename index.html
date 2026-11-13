@@ -1,0 +1,277 @@
+<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#000000">
+<title>Rombo</title>
+<style>
+:root{color-scheme:dark;--g:#22c55e;--r:#ef4444;--mu:#a7adb7;--ln:#2e333b}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{background:#000;color:#fff;margin:0}
+body{font:16px/1.45 system-ui,-apple-system,Segoe UI,sans-serif;-webkit-text-size-adjust:100%;padding:env(safe-area-inset-top) max(16px,env(safe-area-inset-right)) env(safe-area-inset-bottom) max(16px,env(safe-area-inset-left))}
+main{max-width:620px;margin:0 auto;padding:14px 0 36px}
+h1{font-size:1.2rem;margin:0 0 4px}
+h2{font-size:.95rem;margin:0 0 8px}
+.sub{font-size:.8rem;color:var(--mu);margin:0 0 10px}
+.bar{display:flex;flex-wrap:wrap;gap:10px 14px;margin:12px 0 14px}
+.bar label{display:flex;flex-direction:column;gap:4px;font-size:.74rem;color:var(--mu);min-width:0;flex:1 1 160px}
+select,button.s{font:inherit;font-size:.9rem;color:#fff;background:#000;border:1px solid #fff;border-radius:10px;padding:8px 10px;min-height:42px;width:100%;max-width:100%}
+button.s{cursor:pointer;margin:12px 0 18px}
+button.s.on{border-color:var(--g);color:var(--g)}
+.card{border:1px solid #fff;border-radius:16px;padding:18px 16px 16px;background:#070707}
+.card.long{background:#062a14;border-color:var(--g)}
+.card.short{background:#2c0909;border-color:var(--r)}
+.big{font-size:clamp(2.1rem,11vw,3.4rem);font-weight:800;line-height:1.05;letter-spacing:-.01em;margin:0 0 10px}
+.card.none .big{color:#d4d7dc;font-size:clamp(1.6rem,8vw,2.2rem)}
+.card.long .big{color:var(--g)}
+.card.short .big{color:var(--r)}
+.lines p{margin:0 0 6px;font-size:.92rem}
+.ctx{font-size:.8rem;color:var(--mu);margin-top:10px;border-top:1px solid var(--ln);padding-top:8px}
+.ctx:empty{display:none}
+ol{list-style:none;margin:0 0 8px;padding:0;border:1px solid var(--ln);border-radius:12px}
+li{padding:9px 12px;border-top:1px solid var(--ln);font-size:.88rem}
+li:first-child{border-top:0}
+li b{margin-right:6px}
+li.l b{color:var(--g)} li.s b{color:var(--r)}
+li span{display:block;font-size:.78rem;color:var(--mu)}
+li.vuoto{color:var(--mu)}
+.stato{font-size:.8rem;margin:16px 0 4px}
+.stato.ok{color:var(--g)} .stato.ritardo,.stato.errore{color:#fbbf24} .stato.attesa,.stato.chiuso{color:var(--mu)}
+</style></head><body><main>
+<h1>Rombo promettente</h1>
+<p class="sub">Stessa logica dell'indicatore Pine «Punti 5m». Compare un segnale solo quando, dopo una fase di dist bassa, scatta il rombo e 5 minuti dopo l'inclinazione è promettente (✓✓: la dist sale ancora e il prezzo è andato nel verso della zona). Altrimenti niente.</p>
+<div class="bar"><label>Simbolo<select id="sym" aria-label="Simbolo"></select></label><label>Indicatore<select id="rule" aria-label="Indicatore"></select></label></div>
+<section id="card" class="card none" aria-live="polite"><div id="big" class="big">Nessun segnale</div><div id="lines" class="lines"></div><div id="ctx" class="ctx"></div></section>
+<button id="avvisi" class="s" type="button">Attiva gli avvisi (suono, notifica, schermo acceso)</button>
+<section><h2>Segnali promettenti di oggi</h2><ol id="list"></ol><p id="stat" class="sub"></p></section>
+<p id="stato" class="stato attesa">in attesa dei dati</p>
+<p class="sub">Dati: minuti di Yahoo con pre e after market, attraverso il Worker; si usa solo il minuto chiuso, come gli avvisi del Pine. Gli avvisi arrivano solo con la pagina aperta (sul telefono, con lo schermo acceso).</p>
+</main>
+<script>(function(){'use strict';
+const K={B:300,P:6,NWIN:300,QWIN:300,QMIN:30,MCAP:20,WIND:2/3,YIN:.75,YOUT:1.1,WARM:100,LEN:14,HSLOPE:1/11,W:180,LVMIN:30,LAG:60,PCT:.10,NSESS:7,GAP:4500};
+const fin=Number.isFinite;
+function makePort(rule,nyDay,opts){ const ORIZ=(opts&&opts.oriz)||15, MINC=30, DLO=(opts&&opts.dlo)||30, DHI=(opts&&opts.dhi)||45, DMIN=(opts&&opts.dmin)||15;
+const S={n:0,bH:[],bL:[],bC:[],
+trSum:0,trCnt:0,st:NaN, pSum:0,nSum:0,dmCnt:0,sp:NaN,sn:NaN,
+rSu:0,rSd:0,rCnt:0,up:NaN,dn:NaN,
+tArr:[],hLast:NaN, z:0, prevY:false, stJY:false, stJ:'', ad:[], qw:[], qsCur:NaN,
+curT:null,bHi:NaN,bLo:NaN,bCl:NaN,closedCur:false,bkSum:0,bkCnt:0,
+tPrev:NaN,cPrev:NaN,
+day:null,sPts:[],sAv:[],sWn:[],sT:[],sSv:[],hist60:[],sessLen:[],cnt60:0,thr:NaN,
+nf:0,warnT:null,adx:NaN,dxSum:0,dxCnt:0,spA:NaN,snA:NaN,pASum:0,nASum:0,dmACnt:0,tPrevB:null,qT:[],qC:[],qF:[],cntCat:[0,0,0,0,0],hitCat:[0,0,0,0,0]};
+const lastC=i=>S.bC[S.bC.length-1-i], lastH=i=>S.bH[S.bH.length-1-i], lastL=i=>S.bL[S.bL.length-1-i];
+const dmiProbe=(hi,lo,p)=>{ if(!fin(S.sp)||!fin(S.sn)||!fin(S.st)) return NaN; const h=Math.max(hi,p), l=Math.min(lo,p), cj=lastC(0), tr=Math.max(h-l,Math.abs(h-cj),Math.abs(l-cj)), up=h-lastH(0), dn=lastL(0)-l, pdm=(up>dn&&up>0)?up:0, ndm=(dn>up&&dn>0)?dn:0;
+const a=(S.sp*(K.LEN-1)+pdm)/K.LEN, b=(S.sn*(K.LEN-1)+ndm)/K.LEN, s=(S.st*(K.LEN-1)+tr)/K.LEN; return s>0?(100*a/s)-(100*b/s):NaN; };
+const hullProbe=p=>{ const j=S.n-1; if(j<19) return NaN; const t=S.tArr, L=t.length; if(L<4||!fin(t[L-1])||!fin(t[L-2])||!fin(t[L-3])||!fin(t[L-4])||!fin(S.hLast)) return NaN;
+let a=p*10, b=p*21; for(let i=0;i<9;i++) a+=lastC(i)*(9-i); for(let i=0;i<20;i++) b+=lastC(i)*(20-i); a/=55; b/=231; const tn=2*a-b;
+return ((tn*5+t[L-1]*4+t[L-2]*3+t[L-3]*2+t[L-4]*1)/15)-S.hLast; };
+const probe=(hi,lo,p)=>rule==='dmi'?dmiProbe(hi,lo,p):hullProbe(p);
+const flipPx=(d0,hi,lo,p)=>{ const atr=S.st; if(!(atr>0)||!fin(d0)) return null; if(d0===0) return p; if(rule==='hull'){ const m=Math.min(K.MCAP,Math.abs(d0)/K.HSLOPE/atr); return m<K.MCAP?p-d0/K.HSLOPE:null; }
+const Rr=K.MCAP*atr; let a,b; if(d0>0){ a=p-Rr; b=p; if(!(dmiProbe(hi,lo,a)<0)) return null; } else { a=p; b=p+Rr; if(!(dmiProbe(hi,lo,b)>0)) return null; }
+for(let it=0;it<40;it++){ const mid=(a+b)/2, v=dmiProbe(hi,lo,mid); if(d0>0){ if(v>0) b=mid; else a=mid; } else { if(v<0) a=mid; else b=mid; } } const px=(a+b)/2; return Math.min(K.MCAP,Math.abs(px-p)/atr)<K.MCAP?px:null; };
+const margin=(d0,hi,lo,p)=>{ const atr=S.st; if(!(atr>0)||!fin(d0)) return null; if(d0===0) return 0; if(rule==='hull') return Math.min(K.MCAP,Math.abs(d0)/K.HSLOPE/atr);
+const Rr=K.MCAP*atr; let a,b; if(d0>0){ a=p-Rr; b=p; if(!(dmiProbe(hi,lo,a)<0)) return K.MCAP; } else { a=p; b=p+Rr; if(!(dmiProbe(hi,lo,b)>0)) return K.MCAP; }
+for(let it=0;it<40;it++){ const mid=(a+b)/2, v=dmiProbe(hi,lo,mid); if(d0>0){ if(v>0) b=mid; else a=mid; } else { if(v<0) a=mid; else b=mid; } } return Math.min(K.MCAP,Math.abs((a+b)/2-p)/atr); };
+const rank=x=>{ if(!fin(x)) return null; const a=Math.abs(x); let n=0,c=0; for(const v of S.ad){ if(fin(v)){ n++; if(v<=a) c++; } } return n>=20?c/n:null; };
+const rsiProbe=p=>{ if(!fin(S.up)||!fin(S.dn)) return NaN; const al=1/K.LEN, ch=p-lastC(0), u=al*Math.max(ch,0)+(1-al)*S.up, d=al*(-Math.min(ch,0))+(1-al)*S.dn; return d===0?100:u===0?0:100-100/(1+u/d); };
+const strength=(m,r,q)=>{ const sm=m==null?null:Math.sqrt(Math.min(m,K.MCAP)/K.MCAP); let ind=null; if(r!=null&&sm!=null) ind=(r+sm)/2; else if(r!=null) ind=r; else if(sm!=null) ind=sm; const s=ind==null?q:(q==null?ind:K.WIND*ind+(1-K.WIND)*q); return s==null?null:Math.max(.04,s); };
+function closeBucket(hk,lk,ck,tB){ const n=S.n;
+const tr=n===0?hk-lk:Math.max(hk-lk,Math.abs(hk-lastC(0)),Math.abs(lk-lastC(0)));
+let st=S.st, trSum=S.trSum, trCnt=S.trCnt; if(!fin(st)){ trSum+=tr; trCnt++; if(trCnt===K.LEN) st=trSum/K.LEN; } else st=(st*(K.LEN-1)+tr)/K.LEN;
+let sp=S.sp, sn=S.sn, pSum=S.pSum, nSum=S.nSum, dmCnt=S.dmCnt;
+if(n>=1){ const up=hk-lastH(0), dn=lastL(0)-lk, pdm=(up>dn&&up>0)?up:0, ndm=(dn>up&&dn>0)?dn:0; if(!fin(sp)){ pSum+=pdm; nSum+=ndm; dmCnt++; if(dmCnt===K.LEN){ sp=pSum/K.LEN; sn=nSum/K.LEN; } } else { sp=(sp*(K.LEN-1)+pdm)/K.LEN; sn=(sn*(K.LEN-1)+ndm)/K.LEN; }
+const gapB=S.tPrevB!=null&&tB-S.tPrevB>1800, pA=gapB?0:pdm, nA=gapB?0:ndm; if(!fin(S.spA)){ S.pASum+=pA; S.nASum+=nA; S.dmACnt++; if(S.dmACnt===K.LEN){ S.spA=S.pASum/K.LEN; S.snA=S.nASum/K.LEN; } } else { S.spA=(S.spA*(K.LEN-1)+pA)/K.LEN; S.snA=(S.snA*(K.LEN-1)+nA)/K.LEN; } }
+let upR=S.up, dnR=S.dn, rSu=S.rSu, rSd=S.rSd, rCnt=S.rCnt;
+if(n>=1){ const ch=ck-lastC(0), u=Math.max(ch,0), d=-Math.min(ch,0); if(!fin(upR)){ rSu+=u; rSd+=d; rCnt++; if(rCnt===K.LEN){ upR=rSu/K.LEN; dnR=rSd/K.LEN; } } else { upR=(1/K.LEN)*u+(1-1/K.LEN)*upR; dnR=(1/K.LEN)*d+(1-1/K.LEN)*dnR; } }
+let tk=NaN; if(n>=20){ let a=ck*10, b=ck*21; for(let i=0;i<9;i++) a+=lastC(i)*(9-i); for(let i=0;i<20;i++) b+=lastC(i)*(20-i); tk=2*(a/55)-(b/231); }
+const tA=S.tArr.concat([tk]).slice(-5); let hk2=NaN; if(tA.length===5&&tA.every(fin)) hk2=(tA[4]*5+tA[3]*4+tA[2]*3+tA[1]*2+tA[0])/15;
+let dk=NaN; if(rule==='dmi'){ if(fin(sp)&&fin(sn)&&fin(st)&&st>0) dk=100*sp/st-100*sn/st; } else { if(fin(hk2)&&fin(S.hLast)) dk=hk2-S.hLast; }
+const m=(fin(dk)&&n>=2)?margin(dk,hk,lk,ck):null;
+const z=dk>0?1:dk<0?-1:S.z;
+let stK=''; if(z!==0&&n>=1){ const Y=m!=null&&(m<K.YIN||(S.prevY&&m<K.YOUT)); S.prevY=Y; stK=Y?'Y':(z>0?'G':'R'); }
+if(n>=1){ S.qw.push(Math.abs(ck-lastC(0))); if(S.qw.length>K.QWIN) S.qw.shift(); }
+S.bH.push(hk); S.bL.push(lk); S.bC.push(ck); if(S.bC.length>320){ S.bH.shift(); S.bL.shift(); S.bC.shift(); }
+S.ad.push(fin(dk)?Math.abs(dk):NaN); if(S.ad.length>K.NWIN) S.ad.shift();
+S.tPrevB=tB;
+if(fin(S.spA)&&fin(S.snA)){ const dx=(S.spA+S.snA)>0?100*Math.abs(S.spA-S.snA)/(S.spA+S.snA):0; if(!fin(S.adx)){ S.dxSum+=dx; S.dxCnt++; if(S.dxCnt===K.LEN) S.adx=S.dxSum/K.LEN; } else S.adx=(S.adx*(K.LEN-1)+dx)/K.LEN; }
+S.st=st; S.trSum=trSum; S.trCnt=trCnt; S.sp=sp; S.sn=sn; S.pSum=pSum; S.nSum=nSum; S.dmCnt=dmCnt; S.up=upR; S.dn=dnR; S.rSu=rSu; S.rSd=rSd; S.rCnt=rCnt;
+S.tArr=tA; S.hLast=hk2; if(S.z!==0&&z!==S.z) S.nf++; S.z=z; S.stJ=stK; S.stJY=stK==='Y';
+if(S.qw.length>=K.QMIN){ const srt=S.qw.slice().sort((x,y)=>x-y); S.qsCur=Math.max(1e-9,srt[Math.min(srt.length-1,Math.floor(.9*srt.length))]); } else S.qsCur=NaN;
+S.n=n+1; return {d:dk,m,z,state:stK}; }
+function onMinute(t,h,l,c){ const out={t,sample:false}; const nuovoG=S.day===null||nyDay(t)!==S.day;
+const Tb=Math.floor(t/K.B)*K.B;
+if(S.curT!==null&&Tb!==S.curT&&!S.closedCur) closeBucket(S.bHi,S.bLo,S.bCl,S.curT);
+if(S.curT===null||Tb!==S.curT){ S.curT=Tb; S.bHi=h; S.bLo=l; S.closedCur=false; S.bkSum=0; S.bkCnt=0; } else { S.bHi=Math.max(S.bHi,h); S.bLo=Math.min(S.bLo,l); }
+S.bCl=c;
+const dt=t-S.tPrev, cp=dt>K.B?NaN:S.cPrev;
+if(S.n>=1&&S.n>=K.WARM&&fin(S.tPrev)){ const d1=probe(S.bHi,S.bLo,c);
+if(fin(d1)&&d1!==0){ const m=margin(d1,S.bHi,S.bLo,c), r=rank(d1), sc=S.qsCur, f=Math.max(.05,Math.min(1,Math.sqrt(Math.max(5,dt)/K.B))), q=(fin(sc)&&fin(cp))?Math.min(1,Math.abs(c-cp)/(sc*f)):null, s=strength(m,r,q);
+if(s!=null){ const g=d1>0, rs=rsiProbe(c), cb=lastC(K.P-1), dp=c-cb, eps=c*.0002; let pts=null, lev=null;
+if(fin(rs)&&fin(dp)){ const rOK=g?rs>50:rs<50, pOK=g?dp>eps:dp<-eps, pAg=g?dp<-eps:dp>eps; lev=pOK?(rOK?'3':'2p'):(pAg?'0':'1'); if(S.z!==0) pts=(g!==(S.z>0))?-100:(lev==='3'?100:0); }
+const Y=m!=null&&(m<K.YIN||(S.stJY&&m<K.YOUT));
+const fpx=flipPx(d1,S.bHi,S.bLo,c); let flipOk=null; if(fpx!=null&&rule==='dmi'){ const dd=1e-4*S.st; const lo1=dmiProbe(S.bHi,S.bLo,fpx-dd), hi1=dmiProbe(S.bHi,S.bLo,fpx+dd); flipOk=(lo1<0&&hi1>0); } else if(fpx!=null){ flipOk=Math.abs(hullProbe(fpx))<1e-9; }
+Object.assign(out,{sample:true,k:S.n,s,m,r,q,d:d1,g,lev,pts,state:Y?'Y':(g?'G':'R'),envZ:S.z,envY:S.stJY,fpx,flipOk,atr:S.st});
+if(pts!=null){ S.bkSum+=pts; S.bkCnt++; } out.bkAvg=S.bkCnt?S.bkSum/S.bkCnt:null;
+sessionLayer(out);
+if(pts!=null&&m!=null&&S.z!==0){ const mz=(g===(S.z>0))?m:-m; const cat=mz<0?0:mz<.5?1:mz<1?2:(out.p10>=30?3:4), nC=S.cntCat[cat]; out.cat=cat; out.nCasi=nC; out.pGiro=nC>=MINC?S.hitCat[cat]/nC:null; out.primoGiro=cat===0&&S.warnT!==Tb; if(out.primoGiro) S.warnT=Tb; out.mz=mz; } } } }
+out.nfSmp=S.nf;
+S.tPrev=t; S.cPrev=c;
+if(t-Tb===K.B-60){ closeBucket(S.bHi,S.bLo,S.bCl,S.curT); S.closedCur=true; }
+while(S.qT.length&&S.qT[0]<=t-ORIZ*60){ const t0=S.qT.shift(), c0=S.qC.shift(), f0=S.qF.shift(); if(t-t0<=ORIZ*60+120){ S.cntCat[c0]++; if(S.nf-f0>0) S.hitCat[c0]++; } }
+if(out.cat!=null){ S.qT.push(t); S.qC.push(out.cat); S.qF.push(out.nfSmp); }
+if(nuovoG) S.dLow=false; out.risale=false; out.durLow=null; out.zPrima=0;
+if(out.sample&&out.d5!=null){ if(!S.dLow&&out.d5<DLO){ S.dLow=true; S.dLowT=t; S.dLowZ=S.z; } else if(S.dLow&&out.d5>=DHI){ out.durLow=(t-S.dLowT)/60; out.zPrima=S.dLowZ; out.risale=out.durLow>=DMIN&&S.z!==0; S.dLow=false; } }
+out.dLow=!!S.dLow; out.zFine=S.z;
+{ const dk=nyDay(t), h=S.h5||(S.h5=[]); h.push({d5:out.sample&&out.d5!=null?out.d5:null,av:out.sample&&out.av!=null?out.av:null,day:dk}); if(h.length>6) h.shift(); const p=h.length===6?h[0]:null; out.dTr=(out.sample&&out.d5!=null&&p&&p.d5!=null&&p.day===dk)?out.d5-p.d5:null; out.aR=(out.sample&&out.av!=null&&p&&p.av!=null&&p.day===dk)?Math.round(out.av-p.av):null; }
+{ if(!S.cntG){ S.cntG=[0,0,0]; S.lungG=[0,0,0]; S.rTm=null; S.eT=null; } const dRr=out.dTr==null?null:Math.round(out.dTr), distSu=dRr!=null&&dRr>=4, dk2=nyDay(t); out.grado=null;
+if(S.eT!=null){ if(nuovoG) S.eT=null; else if(t-S.eT>=1800){ S.cntG[S.eG]++; S.lungG[S.eG]++; S.eT=null; } else if(S.dLow){ S.cntG[S.eG]++; S.eT=null; } }
+if(out.risale){ S.rTm=t; S.rPx=c; S.rZn=S.z; S.rDay=dk2; }
+else if(S.rTm!=null){ if(S.dLow||dk2!==S.rDay) S.rTm=null; else if(t-S.rTm>=300&&out.sample&&S.st>0){ out.progr=(c-S.rPx)*S.rZn/S.st; out.grado=(distSu?1:0)+(out.progr>0?1:0); out.gZ=S.rZn; out.gT=S.rTm; S.eT=S.rTm; S.eG=out.grado; S.rTm=null; } } }
+out.dR=out.dTr==null?null:Math.round(out.dTr);
+return out; }
+function sessionLayer(o){ const day=nyDay(o.t);
+if(day!==S.day){ if(S.day!==null) S.sessLen.push(S.cnt60); S.cnt60=0; S.day=day; S.sPts=[]; S.sAv=[]; S.sWn=[]; S.sT=[]; S.sSv=[];
+while(S.sessLen.length>K.NSESS){ const cut=S.sessLen.shift(); S.hist60.splice(0,cut); }
+if(S.hist60.length>=100){ const srt=S.hist60.slice().sort((a,b)=>a-b); S.thr=srt[Math.floor(K.PCT*(srt.length-1))]; } else S.thr=NaN; }
+const L=S.sPts.length, w0=Math.max(0,L-(K.W-1)); let sum=0,cnt=0; for(let q=w0;q<L;q++){ const v=S.sPts[q]; if(v!=null){ sum+=v; cnt++; } } if(o.pts!=null){ sum+=o.pts; cnt++; }
+const av=cnt?sum/cnt:0, wn=(L-w0)+1;
+let t10=0,c10=0; for(let q=Math.max(0,L-9);q<L;q++){ const v=S.sPts[q]; if(v!=null){ t10+=v; c10++; } } if(o.pts!=null){ t10+=o.pts; c10++; } o.p10=c10?t10/c10:0; { let t5=o.s, c5=1; for(let q=Math.max(0,L-4);q<L;q++){ t5+=S.sSv[q]; c5++; } o.d5=t5/c5*100; }
+const ref=[]; for(let q=w0;q<L;q++) if(S.sWn[q]>=K.LVMIN) ref.push(S.sAv[q]); if(wn>=K.LVMIN) ref.push(av);
+let pc=null, lvl='na'; if(ref.length>=K.LVMIN){ let lt=0,eq=0; for(const v of ref){ if(v<av-1e-9) lt++; else if(v<=av+1e-9) eq++; } pc=(lt+eq/2)/ref.length*100; lvl=pc<=25?'lo':pc>=75?'hi':'md'; }
+let d60=null; if(L>=K.LAG){ const q=L-K.LAG; if(o.t-S.sT[q]<=K.GAP&&S.sWn[q]>=K.LVMIN) d60=av-S.sAv[q]; }
+const strong=d60!=null&&fin(S.thr)&&d60<=S.thr;
+S.sPts.push(o.pts); S.sAv.push(av); S.sWn.push(wn); S.sT.push(o.t); S.sSv.push(o.s); if(d60!=null){ S.hist60.push(d60); S.cnt60++; }
+Object.assign(o,{av,wn,pc,lvl,d60,thr:S.thr,strong}); }
+return {onMinute,S}; }
+window.PINE={K,makePort};
+})();</script>
+<script>(function(){
+'use strict';
+const $=id=>document.getElementById(id), fin=Number.isFinite, PINE=window.PINE;
+const WORKER='https://yahooproxy.b864v27974.workers.dev';
+const SYMS={'SPY':'SPY · ETF S&P 500','ES=F':'Future S&P 500 (quasi 24 ore, il più vicino al CFD)','QQQ':'QQQ · ETF Nasdaq 100','NQ=F':'Future Nasdaq 100 (quasi 24 ore)'};
+const RULES={dmi:'DMI',hull:'Hull'};
+const LSO=(()=>{ try{ localStorage.setItem('_t','1'); localStorage.removeItem('_t'); return localStorage; }catch(e){ return null; } })();
+const lsGet=k=>{ try{ return LSO?LSO.getItem(k):null; }catch(e){ return null; } }, lsSet=(k,v)=>{ try{ if(LSO) LSO.setItem(k,String(v)); }catch(e){} };
+const ST={sym:(v=>SYMS[v]?v:'SPY')(lsGet('rombo|sym')), rule:(v=>RULES[v]?v:'dmi')(lsGet('rombo|rule'))};
+const SETTLE=66, MAXM=12000, FRESHALERT=600;
+const F={gen:0,bars:new Map(),full:false,busy:false,timer:0,conn:'attesa',err:'',fails:0,acs:new Set(),lastMin:0,P:null,Pkey:'',done:[],dia:new Map(),sig:[],last:null,loaded:false,
+seen:new Set((()=>{ try{ return JSON.parse(lsGet('rombo|seen')||'[]'); }catch(e){ return []; } })())};
+const AV={on:false,ac:null,wake:null,notif:false};
+const nf2=new Intl.NumberFormat('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2});
+const px=n=>fin(n)?nf2.format(n):'—';
+const sgn=(n,d)=>{ if(!fin(n)) return '—'; const s=Math.abs(n).toFixed(d||0).replace('.',','); return (+Math.abs(n).toFixed(d||0)===0?'±':n<0?'−':'+')+s; };
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const hmf=new Intl.DateTimeFormat('it-IT',{hour:'2-digit',minute:'2-digit',hourCycle:'h23',timeZone:'Europe/Rome'}), hm=t=>fin(t)?hmf.format(new Date(t*1000)):'—';
+const mins=sec=>{ const m=Math.max(0,Math.round(sec/60)); return m>=60?Math.floor(m/60)+' h '+String(m%60).padStart(2,'0')+' min':m+' min'; };
+const nyf=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',weekday:'short',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}), etMemo=new Map();
+function et(t){ let v=etMemo.get(t); if(!v){ const p={}; for(const x of nyf.formatToParts(new Date(t*1000))) p[x.type]=x.value; v={day:p.year+'-'+p.month+'-'+p.day,mod:(+p.hour%24)*60+(+p.minute),wd:p.weekday}; if(etMemo.size>30000) etMemo.clear(); etMemo.set(t,v); } return v; }
+const nyDay=t=>et(t).day;
+const zTxt=z=>z>0?'LONG':'SHORT', zArr=z=>z>0?'▲':'▼';
+const HOL=new Set(['2026-01-01','2026-01-19','2026-02-16','2026-04-03','2026-05-25','2026-06-19','2026-07-03','2026-09-07','2026-11-26','2026-12-25','2027-01-01','2027-01-18','2027-02-15','2027-03-26','2027-05-31','2027-06-18','2027-07-05','2027-09-06','2027-11-25','2027-12-24']);
+const isFut=()=>/=F$/.test(ST.sym);
+function marketOpen(now){ const q=et(Math.floor(now/60)*60), m=q.mod;
+if(isFut()){ if(q.wd==='Sat') return false; if(q.wd==='Sun') return m>=1080; if(q.wd==='Fri') return m<1020; return !(m>=1020&&m<1080); }
+if(q.wd==='Sat'||q.wd==='Sun'||HOL.has(q.day)) return false; return m>=240&&m<1200; }
+function freshness(){ const now=Date.now()/1000; if(F.conn==='errore') return {k:'errore',t:'dati non disponibili: '+F.err};
+if(F.conn!=='ok'||!F.lastMin) return {k:'attesa',t:'sto scaricando i minuti di '+ST.sym+'…'};
+const last=hm(F.lastMin); if(!marketOpen(now)) return {k:'chiuso',t:'mercato chiuso · ultimo minuto '+last};
+const m=et(Math.floor(now/60)*60).mod, tol=(m>=570&&m<960)?150:420;
+return now-(F.lastMin+60)<=tol?{k:'ok',t:'dati aggiornati · ultimo minuto chiuso '+last}:{k:'ritardo',t:'dati in ritardo · ultimo minuto chiuso '+last}; }
+function nextDelay(){ const now=Date.now()/1000; if(!marketOpen(now)) return 120; const toClose=(Math.floor(now/60)+1)*60+8-now; return Math.max(4,Math.min(20,toClose)); }
+async function get(range){ const ac=new AbortController(), to=setTimeout(()=>ac.abort(),25000); F.acs.add(ac); const at0=Date.now()/1000;
+try{ const url=WORKER+'?symbol='+encodeURIComponent(ST.sym)+'&interval=1m&range='+range+'&includePrePost=true&_='+Date.now(); let r;
+try{ r=await fetch(url,{signal:ac.signal,cache:'no-store'}); }catch(x){ throw Object.assign(new Error('Worker non raggiungibile (rete o CORS)'),{kind:'network'}); }
+if(r.status===429) throw Object.assign(new Error('troppe richieste (HTTP 429)'),{kind:'rate',retry:+r.headers.get('retry-after')||0});
+if(!r.ok) throw Object.assign(new Error('il Worker ha risposto HTTP '+r.status),{kind:'http'});
+let j; try{ j=await r.json(); }catch(x){ throw Object.assign(new Error('risposta non JSON'),{kind:'json'}); }
+const pr=parseYahoo(j,ST.sym); if(!pr.ok) throw Object.assign(new Error(pr.msg),{kind:pr.code}); pr.at=at0; return pr;
+} finally{ clearTimeout(to); F.acs.delete(ac); } }
+function parseYahoo(j,sym){ const E=(code,msg)=>({ok:false,code,msg});
+if(j==null||typeof j!=='object'||Array.isArray(j)) return E('malformed','la risposta non è un oggetto JSON');
+const ch=j.chart; if(ch==null||typeof ch!=='object') return E('malformed','risposta senza «chart»');
+if(ch.error) return E('provider','Yahoo segnala un errore: '+String(ch.error.description||ch.error.code||'sconosciuto').slice(0,160));
+const res=Array.isArray(ch.result)?ch.result[0]:null; if(!res||typeof res!=='object') return E('empty','nessun risultato per '+sym);
+const meta=res.meta&&typeof res.meta==='object'?res.meta:{};
+if(meta.symbol&&String(meta.symbol).toUpperCase()!==sym.toUpperCase()) return E('symbol','simbolo restituito «'+meta.symbol+'» invece di «'+sym+'»');
+if(meta.dataGranularity&&String(meta.dataGranularity).toLowerCase()!=='1m') return E('interval','granularità «'+meta.dataGranularity+'» invece di 1 minuto');
+const ts=res.timestamp; if(!Array.isArray(ts)||!ts.length) return E('empty','nessun minuto nell\'intervallo (mercato chiuso?)');
+const q=res.indicators&&Array.isArray(res.indicators.quote)?res.indicators.quote[0]:null; if(!q||typeof q!=='object') return E('malformed','manca «indicators.quote»');
+for(const f of ['open','close']) if(!Array.isArray(q[f])||q[f].length!==ts.length) return E('length','serie «'+f+'» non allineata ai minuti');
+const num=x=>typeof x==='number'&&fin(x)?x:null, qh=Array.isArray(q.high)&&q.high.length===ts.length?q.high:null, ql=Array.isArray(q.low)&&q.low.length===ts.length?q.low:null, bars=[];
+for(let i=0;i<ts.length;i++){ const t=ts[i]; if(typeof t!=='number'||!fin(t)||t<=0) continue; bars.push({t,o:num(q.open[i]),c:num(q.close[i]),hi:qh?num(qh[i]):null,lo:ql?num(ql[i]):null}); }
+return bars.length?{ok:true,bars}:E('empty','nessun minuto valido'); }
+function merge(pr){ let lastT=-Infinity; for(const b of pr.bars) if(fin(b.c)&&b.c>0&&b.t>lastT) lastT=b.t;
+for(const b of pr.bars){ if(!fin(b.c)||b.c<=0) continue; const o=fin(b.o)&&b.o>0?b.o:b.c; const hi=fin(b.hi)?b.hi:Math.max(o,b.c), lo=fin(b.lo)?b.lo:Math.min(o,b.c);
+const old=F.bars.get(b.t), ok=!!(old&&old.ok)||b.t<lastT||pr.at>=b.t+SETTLE;
+F.bars.set(b.t,{t:b.t,o,h:Math.max(hi,o,b.c),l:Math.min(lo,o,b.c),c:b.c,ok}); }
+if(F.bars.size>MAXM+300){ const ks=[...F.bars.keys()].sort((p,q)=>p-q); for(const k of ks.slice(0,ks.length-MAXM)) F.bars.delete(k); } }
+const needFull=()=>!F.full||F.bars.size<150||(F.lastMin>0&&Date.now()/1000-F.lastMin>6*3600);
+async function poll(){
+if(F.busy) return; F.busy=true; clearTimeout(F.timer); let wait=60; const gen=F.gen;
+try{ const full=needFull(), pr=await get(full?'7d':'1d');
+if(gen===F.gen){ merge(pr); if(full) F.full=true; F.conn='ok'; F.err=''; F.fails=0; compute(); wait=nextDelay(); } else wait=1;
+}catch(x){ if(gen!==F.gen) wait=1; else { F.fails++; F.conn='errore'; F.err=x.message||String(x); wait=x.kind==='rate'?Math.max(30,x.retry||0):Math.min(60,5*Math.pow(2,Math.min(F.fails,4))); render(); } }
+finally{ F.busy=false; clearTimeout(F.timer); F.timer=setTimeout(poll,wait*1000); } }
+function resetData(){ F.gen++; for(const a of F.acs) try{ a.abort(); }catch(e){} F.acs.clear(); clearTimeout(F.timer); F.busy=false;
+Object.assign(F,{bars:new Map(),full:false,conn:'attesa',err:'',fails:0,lastMin:0,P:null,Pkey:'',done:[],dia:new Map(),sig:[],last:null,loaded:false}); render(); poll(); }
+function compute(){ const ks=[...F.bars.keys()].filter(t=>F.bars.get(t).ok).sort((a,b)=>a-b), key=ST.sym+'|'+ST.rule;
+let full=!F.P||F.Pkey!==key||ks.length<F.done.length;
+if(!full) for(let i=0;i<F.done.length;i++){ const d=F.done[i], b=F.bars.get(ks[i]); if(ks[i]!==d.t||!b||b.o!==d.o||b.h!==d.h||b.l!==d.l||b.c!==d.c){ full=true; break; } }
+if(full){ F.P=PINE.makePort(ST.rule,nyDay); F.Pkey=key; F.done=[]; F.dia=new Map(); F.sig=[]; F.last=null; }
+const fresh=[]; for(let i=F.done.length;i<ks.length;i++){ const b=F.bars.get(ks[i]); step(b,fresh); F.done.push({t:b.t,o:b.o,h:b.h,l:b.l,c:b.c}); }
+F.lastMin=ks.length?ks[ks.length-1]:0;
+const now=Date.now()/1000; let changed=false;
+for(const s of fresh){ if(F.seen.has(s.key)) continue; F.seen.add(s.key); changed=true; if(F.loaded&&now-(s.tC+60)<=FRESHALERT) alertSignal(s); }
+if(changed){ const a=[...F.seen].slice(-300); F.seen=new Set(a); lsSet('rombo|seen',JSON.stringify(a)); }
+F.loaded=true; render(); }
+function step(b,fresh){ const P=F.P, o=P.onMinute(b.t,b.h,b.l,b.c), S=P.S; F.last={o,S,t:b.t,c:b.c};
+if(o.risale) F.dia.set(b.t,{t:b.t,z:o.zFine,px:b.c,durLow:o.durLow,zPrima:o.zPrima});
+if(o.grado!=null&&o.grado===2){ const d=F.dia.get(o.gT); const s={key:ST.sym+'|'+ST.rule+'|'+o.gT,tR:o.gT,tC:b.t,z:o.gZ,pxR:d?d.px:NaN,pxC:b.c,pxNow:b.c,progr:o.progr,dR:o.dTr==null?null:Math.round(o.dTr),
+zPrima:d?d.zPrima:0,durLow:d?d.durLow:NaN,day:nyDay(o.gT),open:true,tEnd:null,why:''}; F.sig.push(s); fresh.push(s); }
+for(const s of F.sig){ if(!s.open||s.tC===b.t) continue; let why='';
+if(nyDay(b.t)!==s.day) why='fine giornata'; else if(o.dLow) why='dist di nuovo bassa'; else if(S.z!==s.z) why='zona girata';
+if(why){ s.open=false; s.tEnd=b.t; s.why=why; s.pxEnd=b.c; } else s.pxNow=b.c; } }
+function alertSignal(s){ const txt=zArr(s.z)+' '+zTxt(s.z)+' promettente · '+ST.sym+' ('+RULES[ST.rule]+') · rombo '+hm(s.tR+60)+', ✓✓ '+hm(s.tC+60)+' · '+px(s.pxC);
+if(AV.on&&AV.ac){ try{ const ac=AV.ac, t0=ac.currentTime, f=s.z>0?[660,880,1320]:[1320,880,660]; f.forEach((hz,i)=>{ const o=ac.createOscillator(), g=ac.createGain(); o.frequency.value=hz; o.type='sine'; g.gain.setValueAtTime(0.0001,t0+i*.18); g.gain.exponentialRampToValueAtTime(0.35,t0+i*.18+.02); g.gain.exponentialRampToValueAtTime(0.0001,t0+i*.18+.16); o.connect(g); g.connect(ac.destination); o.start(t0+i*.18); o.stop(t0+i*.18+.17); }); }catch(e){} }
+try{ if(navigator.vibrate) navigator.vibrate([200,80,200]); }catch(e){}
+try{ if(AV.notif&&'Notification' in window&&Notification.permission==='granted') new Notification('Rombo promettente',{body:txt,tag:s.key}); }catch(e){}
+window.__rombo=(window.__rombo||[]).concat([txt]); }
+async function enableAlerts(){ AV.on=true;
+try{ const C=window.AudioContext||window.webkitAudioContext; if(C){ AV.ac=AV.ac||new C(); await AV.ac.resume(); } }catch(e){}
+try{ if('Notification' in window){ const p=Notification.permission==='default'?await Notification.requestPermission():Notification.permission; AV.notif=p==='granted'; } }catch(e){}
+await keepAwake(); render(); }
+async function keepAwake(){ try{ if(AV.on&&'wakeLock' in navigator&&document.visibilityState==='visible'&&!AV.wake){ AV.wake=await navigator.wakeLock.request('screen'); AV.wake.addEventListener('release',()=>{ AV.wake=null; }); } }catch(e){ AV.wake=null; } }
+function render(){ const fr=freshness(), L=F.last, S=L&&L.S, today=F.lastMin?nyDay(F.lastMin):null;
+const act=[...F.sig].reverse().find(s=>s.open&&s.day===today), card=$('card');
+let cls='none', big='Nessun segnale', lines=[];
+if(act){ cls=act.z>0?'long':'short'; big=zArr(act.z)+' '+zTxt(act.z);
+lines.push('Rombo delle '+hm(act.tR+60)+', confermato ✓✓ alle '+hm(act.tC+60)+': dist '+sgn(act.dR)+' in 5 min, prezzo '+sgn(act.progr,2)+' ATR nel verso della zona.');
+lines.push('In corso da '+mins(F.lastMin+60-(act.tC+60))+' · prezzo '+px(act.pxC)+' → '+px(act.pxNow)+' ('+sgn((act.pxNow-act.pxC)*act.z,2)+' a favore).');
+if(act.zPrima&&act.zPrima!==act.z) lines.push('Prima della fase bassa la zona era '+zTxt(act.zPrima)+': il trend è cambiato.');
+} else if(S){
+if(S.rTm!=null) lines.push('In osservazione: rombo '+zTxt(S.rZn)+' delle '+hm(S.rTm+60)+', verdetto alle '+hm(S.rTm+360)+'.');
+else if(S.dLow) lines.push('Dist bassa da '+mins(F.lastMin+60-S.dLowT)+': si aspetta il rombo.');
+const prev=[...F.sig].reverse().find(s=>s.day===today); if(prev) lines.push('Ultimo segnale: '+zTxt(prev.z)+' delle '+hm(prev.tC+60)+', concluso alle '+hm(prev.tEnd+60)+' ('+prev.why+', '+mins(prev.tEnd-prev.tC)+').');
+if(!lines.length) lines.push('Il segnale compare solo quando, dopo una fase di dist bassa, scatta il rombo e 5 minuti dopo l\'inclinazione è promettente (✓✓).');
+} else lines.push(fr.k==='errore'?'Dati non disponibili.':'Sto preparando il calcolo…');
+card.className='card '+cls; $('big').textContent=big; $('lines').innerHTML=lines.map(x=>'<p>'+esc(x)+'</p>').join('');
+const o=L&&L.o; let ctx='';
+if(S&&o&&o.sample&&fin(o.d5)){ const dR=o.dTr==null?null:Math.round(o.dTr); ctx='Adesso: zona '+(S.z?zTxt(S.z):'—')+' · dist '+Math.round(o.d5)+(dR==null?'':dR>=4?' ↗':dR<=-4?' ↘':' →')+(S.dLow?' (bassa)':''); }
+else if(S&&S.n<PINE.K.WARM) ctx='Riscaldamento: '+S.n+' barre da 5 minuti su '+PINE.K.WARM+' necessarie.';
+$('ctx').textContent=ctx;
+const cg=S&&S.cntG?S.cntG[2]:0, lg=S&&S.lungG?S.lungG[2]:0;
+$('stat').textContent=cg>=5?'Nello storico caricato i rombi ✓✓ sono durati almeno 30 minuti nel '+Math.round(lg/cg*100)+'% dei casi ('+cg+').':'';
+const tl=F.sig.filter(s=>s.day===today).reverse();
+$('list').innerHTML=tl.length?tl.map(s=>'<li class="'+(s.z>0?'l':'s')+'"><b>'+zArr(s.z)+' '+zTxt(s.z)+'</b> rombo '+hm(s.tR+60)+' · ✓✓ '+hm(s.tC+60)+' a '+px(s.pxC)+'<span>'+(s.open?'in corso, '+sgn((s.pxNow-s.pxC)*s.z,2)+' a favore':'durato '+mins(s.tEnd-s.tC)+' ('+s.why+'), '+sgn((s.pxEnd-s.pxC)*s.z,2)+' a favore')+'</span></li>').join(''):'<li class="vuoto">Nessun segnale promettente oggi.</li>';
+$('stato').textContent=fr.t; $('stato').className='stato '+fr.k;
+const btn=$('avvisi'); btn.textContent=AV.on?('Avvisi attivi: suono'+(AV.notif?', notifiche':'')+(AV.wake?', schermo acceso':'')):'Attiva gli avvisi (suono, notifica, schermo acceso)'; btn.classList.toggle('on',AV.on);
+document.title=act?(zArr(act.z)+' '+zTxt(act.z)+' ✓✓ · '+ST.sym):'Rombo · '+ST.sym; }
+function init(){ const ss=$('sym'), sr=$('rule');
+ss.innerHTML=Object.entries(SYMS).map(([k,v])=>'<option value="'+esc(k)+'">'+esc(v)+'</option>').join(''); ss.value=ST.sym;
+sr.innerHTML=Object.entries(RULES).map(([k,v])=>'<option value="'+k+'">'+v+'</option>').join(''); sr.value=ST.rule;
+ss.addEventListener('change',()=>{ ST.sym=ss.value; lsSet('rombo|sym',ST.sym); resetData(); });
+sr.addEventListener('change',()=>{ ST.rule=sr.value; lsSet('rombo|rule',ST.rule); F.P=null; F.loaded=false; if(F.bars.size) compute(); else render(); });
+$('avvisi').addEventListener('click',enableAlerts);
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible'){ keepAwake(); try{ if(AV.ac&&AV.ac.state!=='running') AV.ac.resume(); }catch(e){} clearTimeout(F.timer); if(!F.busy) poll(); } });
+setInterval(render,30000);
+render(); poll(); }
+if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',init); else init();
+})();</script>
+</body></html>
